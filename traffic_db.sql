@@ -35,3 +35,4 @@ INSERT INTO `log_lalu_lintas` (`simpang_id`, `jumlah_kendaraan`, `durasi_terpili
 (1, 28, 45, NOW() - INTERVAL 5 MINUTE),
 (2, 15, 30, NOW() - INTERVAL 10 MINUTE),
 (1, 35, 50, NOW() - INTERVAL 15 MINUTE);
+

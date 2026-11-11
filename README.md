@@ -36,3 +36,4 @@ Smart-Traffic/
 3. Buat database baru bernama `traffic_db` dan impor file `traffic_db.sql`.
 4. Sesuaikan konfigurasi port dan kredensial database pada `koneksi.php` jika diperlukan.
 5. Akses website melalui browser: `http://localhost/Smart-Traffic/Smart-Traffic/` atau `http://localhost/Smart-Traffic/`
+
