@@ -1,4 +1,5 @@
 <?php
+//test
 include 'koneksi.php';
 $result = $conn->query("SELECT * FROM status_persimpangan");
 ?>
