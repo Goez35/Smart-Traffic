@@ -13,3 +13,9 @@ Desktop.ini
 *.log
 tmp/
 
+# Kredensial & Konfigurasi Lokal (Jangan di-commit)
+config.php
+**/secrets.h
+.env
+
+
