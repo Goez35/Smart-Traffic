@@ -2,8 +2,8 @@
         <section id="log-section">
             <div class="section-header-block">
                 <div>
-                    <h2 class="section-title">Riwayat Siklus &amp; Kepadatan Sensor</h2>
-                    <p class="section-desc">Catatan pembacaan jarak sensor HC-SR04, rasio terisi (jendela 5 detik), klasifikasi kepadatan, dan durasi hijau adaptif.</p>
+                    <h2 class="section-title">Riwayat Siklus &amp; Antrean Kendaraan</h2>
+                    <p class="section-desc">Catatan pembacaan jarak sensor HC-SR04, jumlah kendaraan terhitung selama lampu merah, klasifikasi kepadatan, dan durasi hijau adaptif.</p>
                 </div>
             </div>
 
@@ -14,7 +14,7 @@
                             <th>No Log</th>
                             <th>Jalur Persimpangan</th>
                             <th>Jarak Sensor</th>
-                            <th>Kepadatan (5 dtk)</th>
+                            <th>Kepadatan &amp; Antrean</th>
                             <th>Durasi Hijau Terpilih</th>
                             <th>Waktu Pencatatan</th>
                         </tr>
@@ -28,7 +28,7 @@
                             <?php foreach ($logs as $log):
                                 $namaJalurLog = !empty($log['nama_simpang']) ? $log['nama_simpang'] : ('Jalur ' . intval($log['simpang_id']));
                                 $jarakLog     = isset($log['jarak_cm']) ? number_format(floatval($log['jarak_cm']), 1) . ' cm' : '-';
-                                $rasioLog     = isset($log['rasio_terisi']) ? number_format(floatval($log['rasio_terisi']), 0) . '%' : '0%';
+                                $jmlMobilLog  = intval($log['jumlah_kendaraan'] ?? 0);
                                 $kepadatanLog = $log['kepadatan'] ?? 'Sepi';
                             ?>
                             <tr>
@@ -37,7 +37,7 @@
                                 <td><span class="pill-unit"><i class="bi bi-rulers"></i> <?= htmlspecialchars($jarakLog); ?></span></td>
                                 <td>
                                     <span class="pill-badge <?= ($kepadatanLog === 'Padat') ? 'badge-padat' : (($kepadatanLog === 'Sedang') ? 'badge-manual' : 'badge-auto'); ?>">
-                                        <?= htmlspecialchars($kepadatanLog); ?> (<?= htmlspecialchars($rasioLog); ?>)
+                                        <?= htmlspecialchars($kepadatanLog); ?> (<?= $jmlMobilLog; ?> Mobil)
                                     </span>
                                 </td>
                                 <td><span class="pill-duration"><i class="bi bi-stopwatch"></i> <?= intval($log['durasi_terpilih']); ?> Detik</span></td>

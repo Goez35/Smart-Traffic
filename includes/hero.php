@@ -14,7 +14,7 @@
                 </h1>
 
                 <p class="hero-subtitle">
-                    Penyesuaian durasi lampu hijau otomatis di Cloud Worker berbasis kepadatan antrean 5 detik terakhir dari 4 sensor ultrasonik HC-SR04 (ambang &lt; <?= htmlspecialchars($config_map['ambang_cm'] ?? '10'); ?> cm), dilengkapi pengaman transisi &amp; fallback lokal.
+                    Penyesuaian durasi lampu hijau otomatis di Cloud Worker berbasis penghitung kendaraan masuk (Edge Detection &lt; <?= htmlspecialchars($config_map['ambang_cm'] ?? '5'); ?> cm + normalisasi Hysteresis) &amp; deteksi antrean macet dari 4 sensor ultrasonik HC-SR04.
                 </p>
 
                 <div class="hero-actions">
@@ -68,7 +68,7 @@
                                     <span class="item-badge-mode <?= ($item['mode'] === 'manual') ? 'badge-mode-manual' : 'badge-mode-auto'; ?>">
                                         <?= ($item['mode'] === 'manual') ? 'PRIORITAS' : 'AUTO'; ?>
                                     </span>
-                                    <span>&bull; <?= number_format(floatval($item['jarak_cm'] ?? 30), 1); ?> cm (<?= htmlspecialchars($item['kepadatan'] ?? 'Sepi'); ?>)</span>
+                                    <span>&bull; <?= intval($item['jumlah_kendaraan'] ?? 0); ?> mobil &bull; <?= number_format(floatval($item['jarak_cm'] ?? 30), 1); ?> cm (<?= htmlspecialchars($item['kepadatan'] ?? 'Sepi'); ?>)</span>
                                 </div>
                             </div>
                         </a>
