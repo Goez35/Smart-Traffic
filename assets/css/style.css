@@ -571,6 +571,11 @@ header.nav-header {
     color: #b45309;
 }
 
+.badge-padat {
+    background: #fee2e2;
+    color: #b91c1c;
+}
+
 /* Traffic Light Component */
 .traffic-light-visual-box {
     display: flex;

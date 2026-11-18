@@ -35,7 +35,7 @@ function toggleAutoRefresh() {
     }
 }
 
-// Pause refresh when user interacts with inputs or selects
+// Jeda auto-refresh ketika pengguna sedang fokus memilih dropdown/input
 document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('form, select, input').forEach(el => {
         el.addEventListener('focus', () => { isUserInteracting = true; });
@@ -47,21 +47,15 @@ function pauseRefreshDuringSubmit() {
     isAutoRefreshActive = false;
 }
 
-// Handle Mode Switch
+// Langsung submit form saat pengguna mengubah mode pada kartu jalur
 function handleModeChange(selectElement, id) {
-    const isManual = selectElement.value === 'manual';
-    const lampSelect = document.getElementById('select-lampu-' + id);
-    const submitBtn = document.getElementById('btn-submit-' + id);
-
-    if (lampSelect) lampSelect.disabled = !isManual;
-    if (submitBtn) submitBtn.disabled = !isManual;
-
-    if (!isManual) {
+    pauseRefreshDuringSubmit();
+    if (selectElement && selectElement.form) {
         selectElement.form.submit();
     }
 }
 
-// Live Filter Intersections
+// Filter kartu persimpangan secara real-time
 function filterIntersections(keyword) {
     const query = (keyword || '').toLowerCase().trim();
     const cards = document.querySelectorAll('#gridCards .simpang-card');
@@ -74,4 +68,3 @@ function filterIntersections(keyword) {
         }
     });
 }
-
