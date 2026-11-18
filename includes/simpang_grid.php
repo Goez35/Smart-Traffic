@@ -64,7 +64,7 @@
                             <div class="active-color-name <?= htmlspecialchars($lampu); ?>"><?= ucfirst(htmlspecialchars($lampu)); ?></div>
                             <div style="margin-top: 6px;">
                                 <span class="pill-badge <?= $badgeKepadatanClass; ?>" style="font-size: 11px;">
-                                    <?= htmlspecialchars($kepadatan); ?> (<?= number_format($rasio, 0); ?>%)
+                                    <?= htmlspecialchars($kepadatan); ?> &bull; <?= intval($row['jumlah_kendaraan'] ?? 0); ?> Mobil
                                 </span>
                             </div>
                         </div>
@@ -84,11 +84,11 @@
 
                         <div class="metric-chip">
                             <div class="metric-label">
-                                <i class="bi bi-broadcast"></i> Jarak Sensor
+                                <i class="bi bi-broadcast"></i> Jarak &amp; Antrean
                             </div>
                             <div class="metric-value">
                                 <?= number_format($jarakCm, 1); ?>
-                                <span style="font-size: 13px; font-weight: 500;">cm <?= $terisiSkr ? '(Terisi)' : ''; ?></span>
+                                <span style="font-size: 13px; font-weight: 500;">cm (<?= intval($row['jumlah_kendaraan'] ?? 0); ?> unit)</span>
                             </div>
                         </div>
                     </div>

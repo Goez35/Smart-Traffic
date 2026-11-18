@@ -132,6 +132,48 @@ verifikasi(
 );
 
 // ============================================================================
+// PENGUJIAN 2B: PENGHITUNG KENDARAAN (EDGE DETECTION + HYSTERESIS + MACET)
+// ============================================================================
+echo "\n--- [2B] Pengujian Penghitung Kendaraan (Edge Detection + Hysteresis >= 7 cm) ---\n";
+
+function simulasiHitungMobilHysteresis(array $rentetanJarakCm, float $ambangMasuk = 5.0, float $hysteresis = 2.0): int {
+    $jumlahMobil = 0;
+    $sedangTerdeteksi = false;
+    $ambangKeluar = $ambangMasuk + $hysteresis; // 7.0 cm
+
+    foreach ($rentetanJarakCm as $distCm) {
+        if ($distCm < $ambangMasuk) {
+            if (!$sedangTerdeteksi) {
+                $sedangTerdeteksi = true;
+                $jumlahMobil++;
+            }
+        } elseif ($distCm >= $ambangKeluar) {
+            if ($sedangTerdeteksi) {
+                $sedangTerdeteksi = false;
+            }
+        }
+    }
+    return $jumlahMobil;
+}
+
+// Uji 1: 1 mobil masuk namun jarak sensor bergoyang di sekitar 4.8 - 5.6 cm (< 7.0 cm) lalu baru pergi (25 cm) -> wajib dihitung 1 mobil
+$ujiGoyangan1Mobil = simulasiHitungMobilHysteresis([25.0, 4.8, 5.2, 4.9, 5.5, 4.7, 25.0]);
+verifikasi(
+    $ujiGoyangan1Mobil === 1,
+    "Hysteresis mencegah goyangan jarak (4.8 <-> 5.5 cm) terhitung ganda",
+    "Sampel: [25, 4.8, 5.2, 4.9, 5.5, 4.7, 25] -> Terhitung: {$ujiGoyangan1Mobil} mobil"
+);
+
+// Uji 2: 3 mobil masuk berurutan selama lampu merah lalu sensor kosong di akhir -> tetap tersimpan 3 mobil (Sedang 10s)
+$uji3MobilMasuk = simulasiHitungMobilHysteresis([25.0, 3.2, 3.5, 15.0, 4.1, 12.0, 2.9, 3.0, 25.0, 25.0, 25.0]);
+$kepadatan3Mobil = ($uji3MobilMasuk >= 4) ? 'Padat' : (($uji3MobilMasuk >= 2) ? 'Sedang' : 'Sepi');
+verifikasi(
+    $uji3MobilMasuk === 3 && $kepadatan3Mobil === 'Sedang',
+    "3 mobil masuk di awal lampu merah tetap tersimpan sebagai Sedang (10 dtk)",
+    "Terhitung: {$uji3MobilMasuk} mobil -> Kepadatan: {$kepadatan3Mobil}"
+);
+
+// ============================================================================
 // PENGUJIAN 3: KESELAMATAN TRANSISI 10 SIKLUS PENUH (INVARIAN BAGIAN 8)
 // ============================================================================
 echo "\n--- [3] Pengujian Invarian Keselamatan Transisi (10 Siklus Penuh 4 Jalur) ---\n";
