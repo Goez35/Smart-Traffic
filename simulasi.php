@@ -13,56 +13,66 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Simulasi Perempatan 4 Jalur - SmartTraffic</title>
+    <meta name="referrer" content="strict-origin-when-cross-origin">
+    <title>Simulasi Perempatan 4 Jalur | SmartTraffic</title>
     <!-- Google Fonts: Plus Jakarta Sans -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    <!-- Bootstrap Icons -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <!-- Bootstrap Icons (Secured with Subresource Integrity, CORS, and Referrer Policy) -->
+    <link
+        rel="stylesheet"
+        href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"
+        integrity="sha384-XGjxtQfXaH2tnPFa9x+ruJTuLE3Aa6LhHSWRr1XeTyhezb4abCG4ccI5AkVDxqC+"
+        crossorigin="anonymous"
+        referrerpolicy="no-referrer"
+    >
     <!-- Style Utama Dashboard + Style Simulasi -->
     <link rel="stylesheet" href="assets/css/style.css">
     <link rel="stylesheet" href="assets/css/simulasi.css">
 </head>
 <body>
+    <a href="#main-content" class="skip-link visually-hidden">Langsung ke konten utama</a>
 
     <!-- Header Navigation Bar -->
     <header class="nav-header">
         <div class="nav-left">
             <a href="index.php" class="brand-logo">
-                <span class="dot"></span>
+                <span class="dot" aria-hidden="true"></span>
                 <span>SmartTraffic</span>
             </a>
         </div>
 
         <div class="nav-right">
-            <a href="index.php#control-section" class="nav-link-item">Monitoring 4 Jalur</a>
-            <a href="index.php#log-section" class="nav-link-item">Riwayat &amp; Log</a>
-            <a href="simulasi.php" class="nav-link-item" style="color: #141414; font-weight: 800;">Simulasi 4 Jalur</a>
+            <nav aria-label="Utama" class="nav-links-group">
+                <a href="index.php#control-section" class="nav-link-item">Monitoring 4 Jalur</a>
+                <a href="index.php#log-section" class="nav-link-item">Riwayat &amp; Log</a>
+                <a href="simulasi.php" class="nav-link-item" aria-current="page" style="color: #141414; font-weight: 800;">Simulasi 4 Jalur</a>
+            </nav>
 
-            <div class="refresh-pill" title="Mode simulasi berjalan murni di browser tanpa menyentuh ESP32/Database">
-                <span class="indicator-ring" style="background: #10b981;"></span>
-                <span>Mode: Simulasi Browser</span>
+            <div class="refresh-pill" id="headerModePill" role="status" aria-live="polite">
+                <span class="indicator-ring" id="headerModeDot" aria-hidden="true" style="background: #10b981;"></span>
+                <span id="headerModeText">Mode: LIVE Sensor ESP32</span>
             </div>
 
             <a href="index.php" class="btn-header-action">
-                <i class="bi bi-arrow-left"></i> Kembali ke Dashboard
+                <i class="bi bi-arrow-left" aria-hidden="true"></i> Kembali ke Dashboard
             </a>
         </div>
     </header>
 
-    <div class="main-wrapper">
+    <main id="main-content" class="main-wrapper" tabindex="-1">
 
         <!-- Judul Halaman Simulasi -->
         <div class="sim-page-header">
             <div>
                 <div class="sim-tag">
                     <i class="bi bi-stoplights"></i>
-                    <span>Simulator Perempatan 4 Jalur &bull; Logika Adaptif HC-SR04</span>
+                    <span>Visualisasi Real-Time &amp; Simulator Perempatan 4 Jalur &bull; HC-SR04</span>
                 </div>
-                <h1 class="section-title" style="font-size: 30px;">Simulasi Lalu Lintas Adaptif 4 Jalur</h1>
+                <h1 class="section-title" style="font-size: 30px;">Visualisasi &amp; Simulasi Lalu Lintas Adaptif 4 Jalur</h1>
                 <p class="section-desc">
-                    Simulasi mandiri di browser untuk menguji algoritma kepadatan jendela 5 detik (ambang &lt; 10 cm), antrean mobil, serta invarian keselamatan transisi lampu tanpa memengaruhi perangkat ESP32 asli.
+                    Menampilkan visual perempatan 4 jalur, jarak sensor HC-SR04 (ambang &lt; <span id="descAmbangCm">5</span> cm), jumlah antrean mobil terhitung, serta lampu aktif secara <strong>Real-Time dari ESP32</strong> (dapat juga dialihkan ke Mode Simulator Virtual).
                 </p>
             </div>
         </div>
@@ -75,6 +85,19 @@
 
         <!-- Bar Kontrol Utama Simulasi -->
         <div class="sim-control-bar">
+            <!-- Pilihan Sumber Data: LIVE ESP32 vs SIMULATOR VIRTUAL -->
+            <div class="sim-ctrl-group">
+                <span class="sim-ctrl-label">Sumber Data:</span>
+                <button type="button" id="btnLiveEsp32" class="btn-sim primary" onclick="setModeLiveSensor(true)" title="Sinkronkan langsung dengan bacaan sensor ultrasonik ESP32 & Worker MQTT">
+                    <i class="bi bi-broadcast-pin"></i>
+                    <span id="textLiveEsp32">LIVE Sensor ESP32 (Aktif)</span>
+                </button>
+                <button type="button" id="btnVirtualSim" class="btn-sim" onclick="setModeLiveSensor(false)" title="Gunakan slider manual & skenario virtual di browser">
+                    <i class="bi bi-sliders"></i>
+                    <span>Simulator Virtual</span>
+                </button>
+            </div>
+
             <!-- Tombol Mulai / Jeda / Reset -->
             <div class="sim-ctrl-group">
                 <span class="sim-ctrl-label">Kendali:</span>
@@ -84,7 +107,7 @@
                 </button>
                 <button type="button" class="btn-sim danger" onclick="resetSimulasi()">
                     <i class="bi bi-arrow-counterclockwise"></i>
-                    <span>Reset (Semua Merah)</span>
+                    <span>Reset</span>
                 </button>
             </div>
 
@@ -98,14 +121,18 @@
 
             <!-- Pilihan Mode Otomatis / Manual Prioritas -->
             <div class="sim-ctrl-group">
-                <span class="sim-ctrl-label">Mode Kerja:</span>
-                <select id="selectModeSim" class="sim-select" onchange="ubahModeSimulasi(this.value)">
+                <label for="selectModeSim" class="sim-ctrl-label">Kendali Lampu:</label>
+                <select id="selectModeSim" name="mode_simulasi" class="sim-select" onchange="ubahModeSimulasi(this.value)">
                     <option value="AUTO">Otomatis (Adaptif Sensor)</option>
-                    <option value="MANUAL_1">Manual &mdash; Prioritas Jalur 1 (Utara)</option>
-                    <option value="MANUAL_2">Manual &mdash; Prioritas Jalur 2 (Timur)</option>
-                    <option value="MANUAL_3">Manual &mdash; Prioritas Jalur 3 (Selatan)</option>
-                    <option value="MANUAL_4">Manual &mdash; Prioritas Jalur 4 (Barat)</option>
+                    <option value="MANUAL_1">Manual &mdash; Hijaukan Jalur 1 (Utara)</option>
+                    <option value="MANUAL_2">Manual &mdash; Hijaukan Jalur 2 (Timur)</option>
+                    <option value="MANUAL_3">Manual &mdash; Hijaukan Jalur 3 (Selatan)</option>
+                    <option value="MANUAL_4">Manual &mdash; Hijaukan Jalur 4 (Barat)</option>
                 </select>
+                <button type="button" id="btnQuickAuto" class="btn-sim" onclick="setManualHijauJalur(0)" style="display: none;">
+                    <i class="bi bi-arrow-repeat" aria-hidden="true"></i>
+                    <span>Kembali ke AUTO</span>
+                </button>
             </div>
 
             <!-- Preset Skenario Uji Cepat -->
@@ -176,27 +203,27 @@
                         <span class="sub" id="stageSub4">30.0 cm &bull; Sepi (0%)</span>
                     </div>
 
-                    <!-- Lampu Lalu Lintas di 4 Lengan Perempatan -->
-                    <div class="stage-traffic-light vertical lane-1">
-                        <span id="bulb-1-merah" class="stage-bulb merah active"></span>
-                        <span id="bulb-1-kuning" class="stage-bulb kuning"></span>
-                        <span id="bulb-1-hijau" class="stage-bulb hijau"></span>
-                    </div>
-                    <div class="stage-traffic-light horizontal lane-2">
-                        <span id="bulb-2-merah" class="stage-bulb merah active"></span>
-                        <span id="bulb-2-kuning" class="stage-bulb kuning"></span>
-                        <span id="bulb-2-hijau" class="stage-bulb hijau"></span>
-                    </div>
-                    <div class="stage-traffic-light vertical lane-3">
-                        <span id="bulb-3-merah" class="stage-bulb merah active"></span>
-                        <span id="bulb-3-kuning" class="stage-bulb kuning"></span>
-                        <span id="bulb-3-hijau" class="stage-bulb hijau"></span>
-                    </div>
-                    <div class="stage-traffic-light horizontal lane-4">
-                        <span id="bulb-4-merah" class="stage-bulb merah active"></span>
-                        <span id="bulb-4-kuning" class="stage-bulb kuning"></span>
-                        <span id="bulb-4-hijau" class="stage-bulb hijau"></span>
-                    </div>
+                    <!-- Lampu Lalu Lintas di 4 Lengan Perempatan (Elemen <button> Aksesibel) -->
+                    <button type="button" class="stage-traffic-light vertical lane-1" onclick="setManualHijauJalur(1)" aria-label="Hijaukan manual Jalur 1 Utara">
+                        <span id="bulb-1-merah" class="stage-bulb merah active" aria-hidden="true"></span>
+                        <span id="bulb-1-kuning" class="stage-bulb kuning" aria-hidden="true"></span>
+                        <span id="bulb-1-hijau" class="stage-bulb hijau" aria-hidden="true"></span>
+                    </button>
+                    <button type="button" class="stage-traffic-light horizontal lane-2" onclick="setManualHijauJalur(2)" aria-label="Hijaukan manual Jalur 2 Timur">
+                        <span id="bulb-2-merah" class="stage-bulb merah active" aria-hidden="true"></span>
+                        <span id="bulb-2-kuning" class="stage-bulb kuning" aria-hidden="true"></span>
+                        <span id="bulb-2-hijau" class="stage-bulb hijau" aria-hidden="true"></span>
+                    </button>
+                    <button type="button" class="stage-traffic-light vertical lane-3" onclick="setManualHijauJalur(3)" aria-label="Hijaukan manual Jalur 3 Selatan">
+                        <span id="bulb-3-merah" class="stage-bulb merah active" aria-hidden="true"></span>
+                        <span id="bulb-3-kuning" class="stage-bulb kuning" aria-hidden="true"></span>
+                        <span id="bulb-3-hijau" class="stage-bulb hijau" aria-hidden="true"></span>
+                    </button>
+                    <button type="button" class="stage-traffic-light horizontal lane-4" onclick="setManualHijauJalur(4)" aria-label="Hijaukan manual Jalur 4 Barat">
+                        <span id="bulb-4-merah" class="stage-bulb merah active" aria-hidden="true"></span>
+                        <span id="bulb-4-kuning" class="stage-bulb kuning" aria-hidden="true"></span>
+                        <span id="bulb-4-hijau" class="stage-bulb hijau" aria-hidden="true"></span>
+                    </button>
 
                     <!-- Lapisan Render Mobil Animasi -->
                     <div id="carsLayer" class="cars-layer"></div>
@@ -204,7 +231,7 @@
 
                 <div style="margin-top: 12px; font-size: 12px; color: var(--text-muted); text-align: center;">
                     <i class="bi bi-info-circle"></i>
-                    Kotak biru/oranye putus-putus menandakan area baca sensor ultrasonik HC-SR04 (&lt; 10 cm = Terisi).
+                    Tips: Anda juga dapat <strong>mengklik langsung ikon lampu lalu lintas</strong> di gambar perempatan atau tombol pada kartu jalur untuk menghijaukan jalur secara manual.
                 </div>
             </div>
 
@@ -256,9 +283,9 @@
                     ?>
                     <div class="sim-lane-card" id="laneCard-<?= $id; ?>">
                         <div class="sim-lane-top">
-                            <div class="sim-lane-title">
+                            <h3 class="sim-lane-title">
                                 <span><?= htmlspecialchars($nama); ?></span>
-                            </div>
+                            </h3>
                             <span id="laneDensityBadge-<?= $id; ?>" class="pill-badge badge-auto">Sepi (0%)</span>
                         </div>
 
@@ -280,12 +307,13 @@
                         <!-- Kontrol Sensor HC-SR04 Virtual (Slider 0-50 cm + Tombol Antrean Mobil) -->
                         <div class="sim-sensor-control">
                             <div class="sim-slider-row">
-                                <span><i class="bi bi-broadcast"></i> Sensor HC-SR04: <strong id="laneDistLabel-<?= $id; ?>">30.0 cm</strong></span>
+                                <label for="laneSlider-<?= $id; ?>"><i class="bi bi-broadcast" aria-hidden="true"></i> Sensor HC-SR04: <strong id="laneDistLabel-<?= $id; ?>">30.0 cm</strong></label>
                                 <span id="laneOccupiedTag-<?= $id; ?>" style="color: #6b6a67;">Kosong (&ge;10 cm)</span>
                             </div>
                             <input
                                 type="range"
                                 id="laneSlider-<?= $id; ?>"
+                                name="jarak_jalur_<?= $id; ?>"
                                 class="sim-range-input"
                                 min="0"
                                 max="50"
@@ -299,6 +327,19 @@
                                 </button>
                                 <button type="button" class="btn-queue-step" onclick="ubahAntreanMobil(<?= $id; ?>, 1)">
                                     <i class="bi bi-plus-circle"></i> Tambah Mobil
+                                </button>
+                            </div>
+
+                            <!-- Tombol Kendali Manual Langsung per Jalur -->
+                            <div class="sim-manual-lane-ctrl">
+                                <button
+                                    type="button"
+                                    id="btnManualLane-<?= $id; ?>"
+                                    class="btn-manual-lane"
+                                    onclick="toggleManualJalur(<?= $id; ?>)"
+                                >
+                                    <i class="bi bi-stoplights-fill"></i>
+                                    <span id="textManualLane-<?= $id; ?>">Hijaukan Manual Jalur <?= $id; ?></span>
                                 </button>
                             </div>
                         </div>
@@ -323,9 +364,13 @@
             </div>
         </div>
 
-    </div><!-- /.main-wrapper -->
+    </main><!-- /.main-wrapper -->
 
-    <!-- Script Simulasi Murni Browser -->
+    <footer class="site-footer">
+        <p>Smart Adaptive Traffic Light &bull; Visualisasi &amp; Simulator Perempatan 4 Jalur Real-Time</p>
+    </footer>
+
+    <!-- Script Simulasi & Sinkronisasi Real-Time -->
     <script src="assets/js/simulasi.js"></script>
 </body>
 </html>

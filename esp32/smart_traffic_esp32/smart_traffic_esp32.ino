@@ -275,6 +275,9 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
   }
 
   long seq = doc["seq"] | -1;
+  // Perbarui timestamp perintah terakhir setiap kali paket cmd valid diterima (agar tidak terkena timeout 10s saat fase panjang)
+  waktuCmdTerakhirMs = millis();
+
   // Buang perintah duplikat/lama kecuali jika seq di-reset dari worker (mis. seq <= 1)
   if (seq > 1 && seq == seqTerakhir && !dalamModeFallback) {
     return;

@@ -9,7 +9,7 @@
                 </div>
                 <div class="d-flex gap-2" style="align-items: center; flex-wrap: wrap;">
                     <span class="pill-badge badge-auto">Mode Sistem: <?= htmlspecialchars($config_map['mode'] ?? 'AUTO'); ?></span>
-                    <span class="pill-badge badge-manual">Jalur Terisi (&lt;<?= htmlspecialchars($config_map['ambang_cm'] ?? '10'); ?> cm): <?= intval($total_terisi); ?>/4</span>
+                    <span class="pill-badge badge-manual">Jalur Terisi (&lt;<?= htmlspecialchars($config_map['ambang_cm'] ?? '5'); ?> cm): <?= intval($total_terisi); ?>/4</span>
                     <?php if (($config_map['mode'] ?? 'AUTO') === 'MANUAL'): ?>
                     <form action="update_manual.php" method="POST" style="margin: 0;" onsubmit="pauseRefreshDuringSubmit()">
                         <input type="hidden" name="id" value="0">
@@ -30,7 +30,7 @@
                     $jarakCm   = floatval($row['jarak_cm'] ?? 30.0);
                     $rasio     = floatval($row['rasio_terisi'] ?? 0.0);
                     $kepadatan = $row['kepadatan'] ?? 'Sepi';
-                    $ambangCm  = floatval($config_map['ambang_cm'] ?? 10.0);
+                    $ambangCm  = floatval($config_map['ambang_cm'] ?? 5.0);
                     $terisiSkr = ($jarakCm < $ambangCm);
 
                     $badgeKepadatanClass = 'badge-auto';
@@ -43,10 +43,10 @@
                 <div class="simpang-card" id="simpang-<?= $idJalur; ?>" data-name="<?= strtolower(htmlspecialchars($row['nama_simpang'] . ' ' . $kepadatan)); ?>">
                     <!-- Card Top Bar -->
                     <div class="card-top-bar">
-                        <div class="simpang-name">
-                            <i class="bi bi-geo-alt text-muted"></i>
+                        <h3 class="simpang-name" id="heading-simpang-<?= $idJalur; ?>">
+                            <i class="bi bi-geo-alt text-muted" aria-hidden="true"></i>
                             <?= htmlspecialchars($row['nama_simpang']); ?>
-                        </div>
+                        </h3>
                         <span class="pill-badge <?= $isManual ? 'badge-manual' : 'badge-auto'; ?>">
                             <?= $isManual ? 'PRIORITAS MANUAL' : 'AUTO ADAPTIF'; ?>
                         </span>
@@ -100,25 +100,30 @@
 
                     <!-- Safe Priority Control Form (Bagian 7, 8.1, 8.5, 9.10) -->
                     <div class="control-form-wrapper">
-                        <form action="update_manual.php" method="POST" onsubmit="pauseRefreshDuringSubmit()">
+                        <form action="update_manual.php" method="POST" aria-labelledby="heading-simpang-<?= $idJalur; ?>">
                             <input type="hidden" name="id" value="<?= $idJalur; ?>">
                             
                             <div class="form-row">
-                                <label class="form-label-custom">Mode Kendali Jalur <?= $idJalur; ?>:</label>
-                                <select name="mode" class="form-select-custom" onchange="handleModeChange(this, <?= $idJalur; ?>)">
+                                <label for="select-mode-<?= $idJalur; ?>" class="form-label-custom">Mode Kendali Jalur <?= $idJalur; ?>:</label>
+                                <select
+                                    id="select-mode-<?= $idJalur; ?>"
+                                    name="mode"
+                                    class="form-select-custom"
+                                    aria-describedby="desc-mode-<?= $idJalur; ?>"
+                                >
                                     <option value="auto" <?= !$isManual ? 'selected' : ''; ?>>Otomatis (Adaptif Sensor Cloud)</option>
                                     <option value="manual" <?= $isManual ? 'selected' : ''; ?>>Manual &mdash; Prioritaskan Jalur Ini Hijau</option>
                                 </select>
                             </div>
 
-                            <div class="form-row" style="font-size: 12px; color: #6c6962; line-height: 1.45; margin-bottom: 10px;">
-                                <i class="bi bi-shield-lock"></i>
+                            <div id="desc-mode-<?= $idJalur; ?>" class="form-row" style="font-size: 12px; color: #6c6962; line-height: 1.45; margin-bottom: 10px;">
+                                <i class="bi bi-shield-lock" aria-hidden="true"></i>
                                 Memilih <strong>Manual</strong> akan menginstruksikan Worker MQTT untuk memberi lampu Hijau pada jalur ini setelah jalur sebelumnya menyelesaikan transisi <em>Kuning &rarr; Semua Merah</em>.
                             </div>
 
                             <button type="submit" id="btn-submit-<?= $idJalur; ?>" class="btn-apply-custom">
-                                <i class="bi bi-check2-circle"></i>
-                                <?= $isManual ? 'Perbarui / Terapkan Mode' : 'Jadikan Prioritas / Terapkan'; ?>
+                                <i class="bi bi-check2-circle" aria-hidden="true"></i>
+                                <span><?= $isManual ? 'Perbarui / Terapkan Mode' : 'Jadikan Prioritas / Terapkan'; ?></span>
                             </button>
                         </form>
                     </div>

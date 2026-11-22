@@ -107,6 +107,9 @@ $giliranTerakhir = [
 $waktuMuatConfigTerakhir = 0.0;
 $waktuSimpanSensorLog    = 0.0;
 $waktuUpdateDbTerakhir   = 0.0;
+$waktuHeartbeatCmd       = 0.0;
+$waktuStateEsp32Terakhir = 0.0;
+$menungguAckHijauEsp32   = false;
 $esp32Status             = 'offline';
 
 // ============================================================================
@@ -131,7 +134,7 @@ function simpanNilaiConfig(mysqli $conn, string $kunci, string $nilai): void {
     }
 }
 
-function muatConfigDariDb(mysqli $conn, array &$cfg): void {
+function muatConfigDariDb(mysqli $conn, array &$cfg, array &$dataJalur, array &$sampelJendela): void {
     $res = $conn->query("SELECT `kunci`, `nilai` FROM `config`");
     if (!$res) {
         return;
@@ -170,6 +173,28 @@ function muatConfigDariDb(mysqli $conn, array &$cfg): void {
             case 'semua_merah':
                 $cfg['semua_merah'] = max(1, intval($v));
                 break;
+            case 'adjust_mobil_1':
+            case 'adjust_mobil_2':
+            case 'adjust_mobil_3':
+            case 'adjust_mobil_4':
+                $deltaMobil = intval($v);
+                if ($deltaMobil !== 0) {
+                    $idJalurAdj = intval(substr($k, -1));
+                    if ($idJalurAdj >= 1 && $idJalurAdj <= JUMLAH_JALUR) {
+                        $dataJalur[$idJalurAdj]['jumlah_mobil'] = max(0, intval($dataJalur[$idJalurAdj]['jumlah_mobil']) + $deltaMobil);
+                        simpanNilaiConfig($conn, $k, '0');
+                        hitungKepadatanJalur($idJalurAdj, $sampelJendela, $dataJalur, $cfg);
+                        echo sprintf(
+                            "[%s] [ANTREAN WEB] Jalur %d: %+d mobil dari tombol web (Total: %d mobil | Kepadatan: %s)\n",
+                            date('H:i:s'),
+                            $idJalurAdj,
+                            $deltaMobil,
+                            $dataJalur[$idJalurAdj]['jumlah_mobil'],
+                            $dataJalur[$idJalurAdj]['kepadatan']
+                        );
+                    }
+                }
+                break;
         }
     }
 }
@@ -180,7 +205,9 @@ function sinkronkanStatusPersimpanganKeDb(
     array $cfg,
     int $jalurAktif,
     string $faseSekarang,
-    int $durasiHijauTarget
+    int $durasiHijauTarget,
+    float $waktuMulaiFase = 0.0,
+    float $waktuStateEsp32Terakhir = 0.0
 ): void {
     $stmt = $conn->prepare("UPDATE `status_persimpangan`
         SET `mode` = ?,
@@ -195,19 +222,44 @@ function sinkronkanStatusPersimpanganKeDb(
         return;
     }
 
+    // Jika ESP32 mengirim laporan state fisik aktual (< 8 detik terakhir), gunakan warna LED fisik maket agar 100% sinkron
+    $gunakanStateFisikEsp32 = ($waktuStateEsp32Terakhir > 0.0 && (microtime(true) - $waktuStateEsp32Terakhir) <= 8.0);
+    $jalurTampilAktif       = $jalurAktif;
+    $faseTampilSekarang     = $faseSekarang;
+
+    if ($gunakanStateFisikEsp32) {
+        $faseTampilSekarang = 'SEMUA_MERAH';
+        for ($id = 1; $id <= JUMLAH_JALUR; $id++) {
+            $wAktual = $dataJalur[$id]['lampu_aktual'] ?? 'merah';
+            if ($wAktual === 'hijau') {
+                $jalurTampilAktif   = $id;
+                $faseTampilSekarang = 'HIJAU';
+                break;
+            } elseif ($wAktual === 'kuning') {
+                $jalurTampilAktif   = $id;
+                $faseTampilSekarang = 'KUNING';
+                break;
+            }
+        }
+    }
+
     for ($id = 1; $id <= JUMLAH_JALUR; $id++) {
         $modeBaris = ($cfg['mode'] === 'MANUAL' && $cfg['prioritas'] === $id) ? 'manual' : 'auto';
 
-        $warna = 'merah';
-        if ($id === $jalurAktif) {
-            if ($faseSekarang === 'HIJAU') {
-                $warna = 'hijau';
-            } elseif ($faseSekarang === 'KUNING') {
-                $warna = 'kuning';
+        if ($gunakanStateFisikEsp32) {
+            $warna = $dataJalur[$id]['lampu_aktual'] ?? 'merah';
+        } else {
+            $warna = 'merah';
+            if ($id === $jalurAktif) {
+                if ($faseSekarang === 'HIJAU') {
+                    $warna = 'hijau';
+                } elseif ($faseSekarang === 'KUNING') {
+                    $warna = 'kuning';
+                }
             }
         }
 
-        $durasiTampil = ($id === $jalurAktif) ? $durasiHijauTarget : hitungDurasiHijauAdaptif($dataJalur[$id]['kepadatan'], $cfg);
+        $durasiTampil = ($id === $jalurTampilAktif) ? $durasiHijauTarget : hitungDurasiHijauAdaptif($dataJalur[$id]['kepadatan'], $cfg);
         $jarak        = round($dataJalur[$id]['jarak_cm'], 1);
         $rasio        = round($dataJalur[$id]['rasio'], 1);
         $kepadatan    = $dataJalur[$id]['kepadatan'];
@@ -218,8 +270,20 @@ function sinkronkanStatusPersimpanganKeDb(
     }
     $stmt->close();
 
-    simpanNilaiConfig($conn, 'active_lane', (string)$jalurAktif);
-    simpanNilaiConfig($conn, 'phase_state', $faseSekarang);
+    $targetFaseS = $durasiHijauTarget;
+    if ($faseTampilSekarang === 'KUNING') {
+        $targetFaseS = $cfg['kuning'];
+    } elseif ($faseTampilSekarang === 'SEMUA_MERAH') {
+        $targetFaseS = $cfg['semua_merah'];
+    }
+    $sisaFaseS = ($waktuMulaiFase > 0.0)
+        ? round(max(0.0, $targetFaseS - (microtime(true) - $waktuMulaiFase)), 1)
+        : (float)$targetFaseS;
+
+    simpanNilaiConfig($conn, 'active_lane', (string)$jalurTampilAktif);
+    simpanNilaiConfig($conn, 'phase_state', $faseTampilSekarang);
+    simpanNilaiConfig($conn, 'phase_target_s', (string)$targetFaseS);
+    simpanNilaiConfig($conn, 'phase_remaining_s', (string)$sisaFaseS);
 }
 
 function catatSiklusKeLogLaluLintas(
@@ -324,6 +388,16 @@ function hitungKepadatanJalur(int $id, array &$sampelJendela, array &$dataJalur,
 
     // Jika mobil berhenti menumpuk tepat di depan sensor >= 3.5 detik tanpa putus, anggap antrean penuh (Padat)
     $tertahanMacet = ($lamaTertahan >= DURASI_TERTAHAN_PADAT_S);
+    if ($tertahanMacet && $jumlahMobil < 4) {
+        $jumlahMobil = 4;
+        $dataJalur[$id]['jumlah_mobil'] = 4;
+        echo sprintf(
+            "[%s] [DETEKSI MACET] Jalur %d: Sensor tertutup terus >= %.1fs -> Dikunci Padat (setara 4 mobil)\n",
+            date('H:i:s'),
+            $id,
+            DURASI_TERTAHAN_PADAT_S
+        );
+    }
 
     if ($jumlahMobil >= 4 || $tertahanMacet) {
         $kepadatan = 'Padat';
@@ -486,7 +560,11 @@ $mqtt->onMessage(function (string $topic, string $payload) use (
     &$waktuSimpanSensorLog,
     &$esp32Status,
     &$jalurAktif,
-    &$faseSekarang
+    &$faseSekarang,
+    &$durasiHijauTarget,
+    &$waktuMulaiFase,
+    &$waktuStateEsp32Terakhir,
+    &$menungguAckHijauEsp32
 ) {
     $sekarang = microtime(true);
 
@@ -504,7 +582,7 @@ $mqtt->onMessage(function (string $topic, string $payload) use (
         return;
     }
 
-    // 2. Pesan State Aktual (ACK) dari ESP32
+    // 2. Pesan State Aktual (ACK) dari ESP32 — Langsung sinkronkan ke DB begitu LED fisik di maket berubah!
     if ($topic === $topicState) {
         $json = json_decode($payload, true);
         if (is_array($json) && isset($json['lanes']) && is_array($json['lanes'])) {
@@ -515,8 +593,19 @@ $mqtt->onMessage(function (string $topic, string $payload) use (
                     $dataJalur[$id]['lampu_aktual'] = $light;
                 }
             }
+            $waktuStateEsp32Terakhir = $sekarang;
+            $esp32Status             = 'online';
+
+            // Jika kita baru meminta jalurAktif menjadi HIJAU dan maket ESP32 baru saja benar-benar menyalakan LED Hijau tersebut,
+            // mulai hitung mundur durasi hijau dari detik ini agar maket tidak terpotong waktu transisi!
+            if ($menungguAckHijauEsp32 && $faseSekarang === 'HIJAU' && ($dataJalur[$jalurAktif]['lampu_aktual'] ?? '') === 'hijau') {
+                $menungguAckHijauEsp32 = false;
+                $waktuMulaiFase        = $sekarang;
+            }
+
             simpanNilaiConfig($conn, 'esp32_status', 'online');
             simpanNilaiConfig($conn, 'esp32_last_seen', (string)time());
+            sinkronkanStatusPersimpanganKeDb($conn, $dataJalur, $cfg, $jalurAktif, $faseSekarang, $durasiHijauTarget, $waktuMulaiFase, $waktuStateEsp32Terakhir);
         }
         return;
     }
@@ -570,6 +659,9 @@ $mqtt->onMessage(function (string $topic, string $payload) use (
         if ($stmtSensor) {
             $stmtSensor->close();
         }
+
+        // Langsung sinkronkan pembacaan sensor terbaru ke DB begitu paket MQTT tiba
+        sinkronkanStatusPersimpanganKeDb($conn, $dataJalur, $cfg, $jalurAktif, $faseSekarang, $durasiHijauTarget, $waktuMulaiFase, $waktuStateEsp32Terakhir);
     }
 });
 
@@ -584,7 +676,7 @@ echo "Broker EMQX : {$mqttHost}:{$mqttPort} (" . ($mqttTls ? 'TLS' : 'TCP') . ")
 echo "Device ID   : {$deviceId}\n";
 echo "Tekan Ctrl+C untuk menghentikan worker.\n\n";
 
-muatConfigDariDb($conn, $cfg);
+muatConfigDariDb($conn, $cfg, $dataJalur, $sampelJendela);
 $durasiHijauTarget = hitungDurasiHijauAdaptif($dataJalur[$jalurAktif]['kepadatan'], $cfg);
 catatEventLog($conn, 'WORKER_START', "Worker PHP dimulai (Mode Hitung Kendaraan + Hysteresis). Jalur awal: Jalur {$jalurAktif}.");
 
@@ -611,13 +703,13 @@ while (true) {
         $mqtt->loopOnce();
     }
 
-    // 2. Muat ulang parameter `config` dari DB tiap 1 detik
-    if (($sekarang - $waktuMuatConfigTerakhir) >= 1.0) {
+    // 2. Muat ulang parameter `config` dari DB tiap 0.25 detik (respons instan untuk tombol Manual)
+    if (($sekarang - $waktuMuatConfigTerakhir) >= 0.25) {
         $waktuMuatConfigTerakhir = $sekarang;
         $modeLama      = $cfg['mode'];
         $prioritasLama = $cfg['prioritas'];
 
-        muatConfigDariDb($conn, $cfg);
+        muatConfigDariDb($conn, $cfg, $dataJalur, $sampelJendela);
 
         for ($id = 1; $id <= JUMLAH_JALUR; $id++) {
             hitungKepadatanJalur($id, $sampelJendela, $dataJalur, $cfg);
@@ -686,7 +778,7 @@ while (true) {
             $faseSekarang   = 'KUNING';
             $waktuMulaiFase = $sekarang;
             publishPerintahLampu($mqtt, $topicCmd, $seqCmd, $jalurAktif, $faseSekarang, $durasiHijauTarget);
-            sinkronkanStatusPersimpanganKeDb($conn, $dataJalur, $cfg, $jalurAktif, $faseSekarang, $durasiHijauTarget);
+            sinkronkanStatusPersimpanganKeDb($conn, $dataJalur, $cfg, $jalurAktif, $faseSekarang, $durasiHijauTarget, $waktuMulaiFase, $waktuStateEsp32Terakhir);
             echo sprintf(
                 "[%s] [TRANSISI] Jalur %d -> KUNING (%ds) | Alasan: %s\n",
                 date('H:i:s'),
@@ -700,7 +792,7 @@ while (true) {
             $faseSekarang   = 'SEMUA_MERAH';
             $waktuMulaiFase = $sekarang;
             publishPerintahLampu($mqtt, $topicCmd, $seqCmd, $jalurAktif, $faseSekarang, $durasiHijauTarget);
-            sinkronkanStatusPersimpanganKeDb($conn, $dataJalur, $cfg, $jalurAktif, $faseSekarang, $durasiHijauTarget);
+            sinkronkanStatusPersimpanganKeDb($conn, $dataJalur, $cfg, $jalurAktif, $faseSekarang, $durasiHijauTarget, $waktuMulaiFase, $waktuStateEsp32Terakhir);
             echo sprintf(
                 "[%s] [TRANSISI] SEMUA MERAH (%ds) sebelum pindah ke Jalur %d\n",
                 date('H:i:s'),
@@ -736,10 +828,11 @@ while (true) {
 
             $faseSekarang                 = 'HIJAU';
             $waktuMulaiFase               = $sekarang;
+            $menungguAckHijauEsp32        = true;
             $giliranTerakhir[$jalurAktif] = $sekarang;
 
             publishPerintahLampu($mqtt, $topicCmd, $seqCmd, $jalurAktif, $faseSekarang, $durasiHijauTarget);
-            sinkronkanStatusPersimpanganKeDb($conn, $dataJalur, $cfg, $jalurAktif, $faseSekarang, $durasiHijauTarget);
+            sinkronkanStatusPersimpanganKeDb($conn, $dataJalur, $cfg, $jalurAktif, $faseSekarang, $durasiHijauTarget, $waktuMulaiFase, $waktuStateEsp32Terakhir);
             catatSiklusKeLogLaluLintas(
                 $conn,
                 $jalurAktif,
@@ -762,12 +855,18 @@ while (true) {
         }
     }
 
-    // 4. Sinkronkan data terbaru ke DB tiap 1 detik
-    if (($sekarang - $waktuUpdateDbTerakhir) >= 1.0) {
+    // 4. Sinkronkan data terbaru ke DB tiap 0.2 detik (200 ms) agar web selalu real-time dengan maket
+    if (($sekarang - $waktuUpdateDbTerakhir) >= 0.2) {
         $waktuUpdateDbTerakhir = $sekarang;
-        sinkronkanStatusPersimpanganKeDb($conn, $dataJalur, $cfg, $jalurAktif, $faseSekarang, $durasiHijauTarget);
+        sinkronkanStatusPersimpanganKeDb($conn, $dataJalur, $cfg, $jalurAktif, $faseSekarang, $durasiHijauTarget, $waktuMulaiFase, $waktuStateEsp32Terakhir);
     }
 
-    usleep(50000);
+    // 5. Kirim heartbeat `cmd` ke ESP32 tiap 4 detik agar fase Hijau 15s/20s atau Mode Manual tidak memicu Fallback 10s di ESP32
+    if (($sekarang - $waktuHeartbeatCmd) >= 4.0) {
+        $waktuHeartbeatCmd = $sekarang;
+        publishPerintahLampu($mqtt, $topicCmd, $seqCmd, $jalurAktif, $faseSekarang, $durasiHijauTarget);
+    }
+
+    usleep(20000);
 }
 ?>
