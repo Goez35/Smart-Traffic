@@ -9,14 +9,15 @@
 
             <div class="log-container">
                 <table class="custom-table">
+                    <caption class="visually-hidden">Riwayat Siklus Lampu Hijau dan Antrean Kendaraan</caption>
                     <thead>
                         <tr>
-                            <th>No Log</th>
-                            <th>Jalur Persimpangan</th>
-                            <th>Jarak Sensor</th>
-                            <th>Kepadatan &amp; Antrean</th>
-                            <th>Durasi Hijau Terpilih</th>
-                            <th>Waktu Pencatatan</th>
+                            <th scope="col">No Log</th>
+                            <th scope="col">Jalur Persimpangan</th>
+                            <th scope="col">Jarak Sensor</th>
+                            <th scope="col">Kepadatan &amp; Antrean</th>
+                            <th scope="col">Durasi Hijau Terpilih</th>
+                            <th scope="col">Waktu Pencatatan</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -59,12 +60,13 @@
 
             <div class="log-container">
                 <table class="custom-table">
+                    <caption class="visually-hidden">Log Kejadian Sistem dan Status Koneksi MQTT ESP32</caption>
                     <thead>
                         <tr>
-                            <th>ID</th>
-                            <th>Jenis Kejadian</th>
-                            <th>Keterangan</th>
-                            <th>Waktu</th>
+                            <th scope="col">ID</th>
+                            <th scope="col">Jenis Kejadian</th>
+                            <th scope="col">Keterangan</th>
+                            <th scope="col">Waktu</th>
                         </tr>
                     </thead>
                     <tbody>

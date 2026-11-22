@@ -46,11 +46,19 @@
                     </div>
 
                     <!-- Search Input -->
-                    <span class="card-section-label">Filter Jalur</span>
-                    <div class="card-search-pill">
-                        <i class="bi bi-search"></i>
-                        <input type="text" placeholder="Cari nama jalur (Utara, Timur, Selatan, Barat)..." oninput="filterIntersections(this.value)">
-                    </div>
+                    <label for="cardFilterSearch" class="card-section-label">Filter Jalur</label>
+                    <search class="card-search-pill">
+                        <i class="bi bi-search" aria-hidden="true"></i>
+                        <input
+                            type="search"
+                            id="cardFilterSearch"
+                            name="filter_jalur"
+                            placeholder="Cari nama jalur (Utara, Timur, Selatan, Barat)..."
+                            autocorrect="off"
+                            autocapitalize="none"
+                            spellcheck="false"
+                        >
+                    </search>
 
                     <!-- Live 4 Lanes Preview -->
                     <div class="card-item-group">

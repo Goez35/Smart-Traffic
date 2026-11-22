@@ -103,12 +103,13 @@ function buatStateJalurAwal(id, nama) {
         id: id,
         nama: nama,
         lampu: 'merah',          // 'merah' | 'kuning' | 'hijau'
-        jarakCm: 30.0,           // Jarak sensor HC-SR04 virtual (0 - 50 cm)
+        jarakCm: 30.0,           // Jarak sensor HC-SR04 (0 - 50 cm)
         modeSensorManual: false, // true jika pengguna menggeser slider secara langsung
         antreanMobil: [],        // Daftar objek mobil visual di jalur ini
         sampel5Detik: [],        // Riwayat [{ waktuSim: number, terisi: boolean }]
         rasioTerisi: 0.0,        // 0 - 100 (%)
         kepadatan: 'Sepi',       // 'Sepi' | 'Sedang' | 'Padat'
+        jumlahMobilLive: 0,      // Jumlah kendaraan nyata yang dihitung oleh worker_mqtt.php
         durasiRekomendasi: KONFIG_SIMULASI.hijauSepi,
         waktuTungguDetik: (4 - id) * 0.1, // Pembeda awal kecil agar urutan awal mulai dari Jalur 1
     };
@@ -116,6 +117,8 @@ function buatStateJalurAwal(id, nama) {
 
 const stateSimulasi = {
     berjalan: true,
+    modeLiveSensor: (typeof window !== 'undefined'), // Default di browser: Real-Time mengikuti sensor ESP32
+    esp32Online: false,
     kecepatan: 1,                // 1x, 2x, atau 5x
     modeSistem: 'AUTO',          // 'AUTO' | 'MANUAL'
     jalurPrioritas: 0,           // 0 = tidak ada, 1..4 = jalur prioritas manual
@@ -141,6 +144,7 @@ const stateSimulasi = {
 };
 
 let timerLoopSimulasi = null;
+let timerPollingLive  = null;
 
 // ============================================================================
 // 4. LOGIKA KEPADATAN, DURASI HIJAU, & PENJAGA INVARIAN KESELAMATAN
@@ -470,6 +474,21 @@ function satuLangkahSimulasi(dtDetik) {
     stateSimulasi.waktuDalamFaseDetik += dtDetik;
 
     perbaruiPergerakanMobil(dtDetik);
+
+    // Jika sedang mode LIVE Sensor ESP32, lampu & kepadatan disinkronkan dari api_live_state.php
+    if (stateSimulasi.modeLiveSensor) {
+        for (let id = 1; id <= KONFIG_SIMULASI.jumlahJalur; id++) {
+            const j = stateSimulasi.jalur[id];
+            if (j.lampu === 'merah') {
+                j.waktuTungguDetik += dtDetik;
+            } else {
+                j.waktuTungguDetik = 0.0;
+            }
+        }
+        periksaInvarianKeselamatan();
+        return;
+    }
+
     perbaruiJendelaSensor5Detik(dtDetik);
     evaluasiMesinSiklus();
     periksaInvarianKeselamatan();
@@ -540,8 +559,11 @@ function renderTampilanSimulasi() {
 
         // Sub-label di sudut perempatan
         const stageSub = document.getElementById(`stageSub${id}`);
+        const infoAntreanTeks = stateSimulasi.modeLiveSensor
+            ? `${j.jumlahMobilLive} Mobil`
+            : `${j.rasioTerisi.toFixed(0)}%`;
         if (stageSub) {
-            stageSub.textContent = `${j.jarakCm.toFixed(1)} cm • ${j.kepadatan} (${j.rasioTerisi.toFixed(0)}%)`;
+            stageSub.textContent = `${j.jarakCm.toFixed(1)} cm • ${j.kepadatan} (${infoAntreanTeks})`;
         }
 
         // Kartu jalur di panel kanan
@@ -557,7 +579,7 @@ function renderTampilanSimulasi() {
             if (j.kepadatan === 'Padat') cls = 'pill-badge badge-padat';
             else if (j.kepadatan === 'Sedang') cls = 'pill-badge badge-manual';
             densityBadge.className = cls;
-            densityBadge.textContent = `${j.kepadatan} (${j.rasioTerisi.toFixed(0)}%)`;
+            densityBadge.textContent = `${j.kepadatan} (${infoAntreanTeks})`;
         }
 
         const lightText = document.getElementById(`laneLightText-${id}`);
@@ -568,7 +590,9 @@ function renderTampilanSimulasi() {
 
         const queueCount = document.getElementById(`laneQueueCount-${id}`);
         if (queueCount) {
-            const mengantre = j.antreanMobil.filter(m => !m.lewatGaris).length;
+            const mengantre = stateSimulasi.modeLiveSensor
+                ? j.jumlahMobilLive
+                : j.antreanMobil.filter(m => !m.lewatGaris).length;
             queueCount.textContent = String(mengantre);
         }
 
@@ -584,14 +608,34 @@ function renderTampilanSimulasi() {
 
         const occTag = document.getElementById(`laneOccupiedTag-${id}`);
         if (occTag) {
-            occTag.textContent = terisi ? 'Terisi (<10 cm)' : 'Kosong (≥10 cm)';
+            const ambangTampil = KONFIG_SIMULASI.ambangCm;
+            occTag.textContent = terisi ? `Terisi (<${ambangTampil} cm)` : `Kosong (≥${ambangTampil} cm)`;
             occTag.style.color = terisi ? '#d97706' : '#6b6a67';
         }
 
         const slider = document.getElementById(`laneSlider-${id}`);
         if (slider && document.activeElement !== slider) {
-            slider.value = String(j.jarakCm);
+            slider.value = String(Math.min(50, j.jarakCm));
         }
+
+        // Tombol Kendali Manual Langsung per Kartu Jalur
+        const btnManual = document.getElementById(`btnManualLane-${id}`);
+        const textManual = document.getElementById(`textManualLane-${id}`);
+        const adalahPrioritasManual = (stateSimulasi.modeSistem === 'MANUAL' && stateSimulasi.jalurPrioritas === id);
+        if (btnManual) {
+            btnManual.classList.toggle('active-priority', adalahPrioritasManual);
+        }
+        if (textManual) {
+            textManual.textContent = adalahPrioritasManual
+                ? `Prioritas Manual Aktif (Klik -> AUTO)`
+                : `Hijaukan Manual Jalur ${id}`;
+        }
+    }
+
+    // Tombol Cepat Kembali ke AUTO di Bar Atas
+    const btnQuickAuto = document.getElementById('btnQuickAuto');
+    if (btnQuickAuto) {
+        btnQuickAuto.style.display = (stateSimulasi.modeSistem === 'MANUAL') ? 'inline-flex' : 'none';
     }
 
     // 4. Render Mobil di Kanvas Perempatan (490 x 490)
@@ -606,25 +650,25 @@ function renderTampilanSimulasi() {
                 let orientasi = 'v-car';
 
                 if (id === 1) {
-                    // Jalur 1 (Utara -> bergerak turun di lajur kiri vertikal)
-                    orientasi = 'v-car';
-                    x = 196;
-                    y = 128 + m.pos;
-                } else if (id === 3) {
-                    // Jalur 3 (Selatan -> bergerak naik di lajur kanan vertikal)
+                    // Jalur 1 (Utara -> bergerak turun di lajur kiri dari arah Utara)
                     orientasi = 'v-car';
                     x = 272;
+                    y = 128 + m.pos;
+                } else if (id === 3) {
+                    // Jalur 3 (Selatan -> bergerak naik di lajur kiri dari arah Selatan)
+                    orientasi = 'v-car';
+                    x = 196;
                     y = 328 - m.pos;
                 } else if (id === 2) {
-                    // Jalur 2 (Timur -> bergerak ke kiri di lajur atas horizontal)
+                    // Jalur 2 (Timur -> bergerak ke kiri di lajur kiri dari arah Timur)
                     orientasi = 'h-car';
                     x = 328 - m.pos;
-                    y = 196;
+                    y = 272;
                 } else if (id === 4) {
-                    // Jalur 4 (Barat -> bergerak ke kanan di lajur bawah horizontal)
+                    // Jalur 4 (Barat -> bergerak ke kanan di lajur kiri dari arah Barat)
                     orientasi = 'h-car';
                     x = 128 + m.pos;
-                    y = 272;
+                    y = 196;
                 }
 
                 htmlMobil += `<div class="sim-car ${orientasi}" style="left:${x.toFixed(1)}px; top:${y.toFixed(1)}px; background:${m.warna};"></div>`;
@@ -697,25 +741,239 @@ function setKecepatanSimulasi(faktor) {
     renderTampilanSimulasi();
 }
 
-function ubahModeSimulasi(nilaiSelect) {
-    if (nilaiSelect === 'AUTO') {
-        stateSimulasi.modeSistem = 'AUTO';
-        stateSimulasi.jalurPrioritas = 0;
-        catatLogSimulasi('Mode kerja diubah ke OTOMATIS (Adaptif Sensor 4 Jalur).');
-    } else if (nilaiSelect.startsWith('MANUAL_')) {
-        const idPrio = parseInt(nilaiSelect.replace('MANUAL_', ''), 10);
-        if (idPrio >= 1 && idPrio <= KONFIG_SIMULASI.jumlahJalur) {
-            stateSimulasi.modeSistem = 'MANUAL';
-            stateSimulasi.jalurPrioritas = idPrio;
-            catatLogSimulasi(`Mode MANUAL aktif: Prioritas Jalur ${idPrio} (menunggu transisi kuning -> semua merah).`);
+function setModeLiveSensor(aktif) {
+    stateSimulasi.modeLiveSensor = Boolean(aktif);
+
+    if (typeof document !== 'undefined') {
+        const btnLive = document.getElementById('btnLiveEsp32');
+        const textLive = document.getElementById('textLiveEsp32');
+        const btnVirt = document.getElementById('btnVirtualSim');
+        const headerText = document.getElementById('headerModeText');
+        const headerDot = document.getElementById('headerModeDot');
+
+        if (stateSimulasi.modeLiveSensor) {
+            if (btnLive) btnLive.classList.add('primary');
+            if (textLive) textLive.textContent = 'LIVE Sensor ESP32 (Aktif)';
+            if (btnVirt) btnVirt.classList.remove('primary');
+            if (headerText) headerText.textContent = 'Mode: LIVE Sensor ESP32';
+            if (headerDot) headerDot.style.background = '#10b981';
+            catatLogSimulasi('Beralih ke Mode LIVE Sensor ESP32 (sinkronisasi real-time dengan hardware & Worker MQTT).');
+            sinkronkanDataLiveEsp32();
+        } else {
+            KONFIG_SIMULASI.ambangCm = 10.0;
+            const elAmbang = document.getElementById('descAmbangCm');
+            if (elAmbang) elAmbang.textContent = '10';
+            if (btnLive) btnLive.classList.remove('primary');
+            if (textLive) textLive.textContent = 'LIVE Sensor ESP32';
+            if (btnVirt) btnVirt.classList.add('primary');
+            if (headerText) headerText.textContent = 'Mode: Simulator Virtual';
+            if (headerDot) headerDot.style.background = '#3b82f6';
+            catatLogSimulasi('Beralih ke Mode Simulator Virtual (gunakan slider jarak atau tombol preset).');
         }
     }
     renderTampilanSimulasi();
 }
 
+let waktuOverrideManualLokal = 0;
+let sedangFetchLive = false;
+
+async function sinkronkanDataLiveEsp32() {
+    if (!stateSimulasi.modeLiveSensor || typeof fetch === 'undefined' || sedangFetchLive) return;
+    sedangFetchLive = true;
+
+    try {
+        const res = await fetch('api_live_state.php?t=' + Date.now(), { cache: 'no-store' });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data || !data.ok || !Array.isArray(data.lanes)) return;
+
+        stateSimulasi.esp32Online = Boolean(data.esp32_online);
+        if (typeof data.ambang_cm === 'number' && data.ambang_cm > 0) {
+            KONFIG_SIMULASI.ambangCm = data.ambang_cm;
+            const elAmbang = typeof document !== 'undefined' ? document.getElementById('descAmbangCm') : null;
+            if (elAmbang) elAmbang.textContent = String(data.ambang_cm);
+        }
+
+        // Sinkronkan mode kerja & prioritas (beri jeda 1.5 detik setelah klik manual lokal agar request POST selesai dulu)
+        if ((Date.now() - waktuOverrideManualLokal) > 1500) {
+            const modeDb = (data.mode === 'MANUAL') ? 'MANUAL' : 'AUTO';
+            const prioDb = parseInt(data.prioritas || 0, 10);
+            stateSimulasi.modeSistem = modeDb;
+            stateSimulasi.jalurPrioritas = prioDb;
+
+            if (typeof document !== 'undefined') {
+                const selectMode = document.getElementById('selectModeSim');
+                if (selectMode && document.activeElement !== selectMode) {
+                    selectMode.value = (modeDb === 'MANUAL' && prioDb >= 1 && prioDb <= 4)
+                        ? `MANUAL_${prioDb}`
+                        : 'AUTO';
+                }
+            }
+        }
+
+        if (typeof document !== 'undefined') {
+            const headerText = document.getElementById('headerModeText');
+            const headerDot = document.getElementById('headerModeDot');
+            if (headerText) {
+                headerText.textContent = stateSimulasi.esp32Online
+                    ? 'LIVE ESP32: ONLINE'
+                    : 'LIVE Database (ESP32 Offline)';
+            }
+            if (headerDot) {
+                headerDot.style.background = stateSimulasi.esp32Online ? '#10b981' : '#f59e0b';
+            }
+        }
+
+        // Deteksi perubahan fase atau jalur aktif untuk log dan timer fase
+        const faseBaru = (data.phase_state === 'KUNING' || data.phase_state === 'SEMUA_MERAH')
+            ? data.phase_state
+            : 'HIJAU';
+        const idAktifBaru = (faseBaru === 'SEMUA_MERAH') ? 0 : (parseInt(data.active_lane || 1, 10));
+
+        let durasiHijauAktif = KONFIG_SIMULASI.hijauSepi;
+        for (const l of data.lanes) {
+            const id = parseInt(l.id, 10);
+            if (!stateSimulasi.jalur[id]) continue;
+            const j = stateSimulasi.jalur[id];
+
+            j.jarakCm = parseFloat(l.jarak_cm ?? 30.0);
+            j.lampu = (['merah', 'kuning', 'hijau'].includes(l.lampu_aktif)) ? l.lampu_aktif : 'merah';
+            j.rasioTerisi = parseFloat(l.rasio_terisi ?? 0.0);
+            j.kepadatan = l.kepadatan || 'Sepi';
+            j.jumlahMobilLive = parseInt(l.jumlah_kendaraan ?? 0, 10);
+            j.durasiRekomendasi = parseInt(l.durasi_hijau ?? 5, 10);
+
+            if (id === idAktifBaru) {
+                durasiHijauAktif = j.durasiRekomendasi;
+            }
+
+            // Sinkronkan jumlah mobil animasi visual di jalan dengan jumlah kendaraan nyata dari sensor
+            const terisiSekarang = j.jarakCm < KONFIG_SIMULASI.ambangCm;
+            const targetMobilVisual = Math.min(6, Math.max(j.jumlahMobilLive, terisiSekarang ? 1 : 0));
+            const mobilMengantre = j.antreanMobil.filter(m => !m.lewatGaris).length;
+
+            if (mobilMengantre < targetMobilVisual) {
+                for (let k = mobilMengantre; k < targetMobilVisual; k++) {
+                    tambahSatuMobilVisual(id);
+                }
+            } else if (mobilMengantre > targetMobilVisual && j.lampu !== 'hijau') {
+                // Kurangi kelebihan mobil visual saat counter di-reset
+                let selisih = mobilMengantre - targetMobilVisual;
+                while (selisih > 0) {
+                    const idx = j.antreanMobil.findLastIndex(m => !m.lewatGaris);
+                    if (idx >= 0) j.antreanMobil.splice(idx, 1);
+                    selisih--;
+                }
+            }
+        }
+
+        if (typeof data.phase_target_s === 'number' && data.phase_target_s > 0) {
+            stateSimulasi.durasiFaseTargetDetik = data.phase_target_s;
+        }
+        if (typeof data.phase_remaining_s === 'number' && data.phase_remaining_s >= 0) {
+            stateSimulasi.waktuDalamFaseDetik = Math.max(0.0, stateSimulasi.durasiFaseTargetDetik - data.phase_remaining_s);
+        }
+
+        if (faseBaru !== stateSimulasi.fase || idAktifBaru !== stateSimulasi.jalurAktif) {
+            if (stateSimulasi.fase === 'KUNING' && faseBaru === 'SEMUA_MERAH') {
+                stateSimulasi.jumlahSiklusSelesai++;
+            }
+            stateSimulasi.faseSebelumnya = stateSimulasi.fase;
+            stateSimulasi.fase = faseBaru;
+            stateSimulasi.jalurAktif = idAktifBaru;
+
+            if (faseBaru === 'HIJAU') {
+                const jAktif = stateSimulasi.jalur[idAktifBaru];
+                if (jAktif) {
+                    catatLogSimulasi(
+                        `[LIVE] Jalur ${idAktifBaru} -> HIJAU (${stateSimulasi.durasiFaseTargetDetik} dtk) | ${jAktif.kepadatan} (${jAktif.jumlahMobilLive} Mobil, ${jAktif.jarakCm.toFixed(1)} cm)`
+                    );
+                }
+            } else if (faseBaru === 'KUNING') {
+                catatLogSimulasi(`[LIVE] Jalur ${idAktifBaru} -> KUNING (${KONFIG_SIMULASI.kuningDetik} dtk)`);
+            } else {
+                catatLogSimulasi(`[LIVE] SEMUA MERAH (${KONFIG_SIMULASI.semuaMerahDetik} dtk)`);
+            }
+        }
+
+        periksaInvarianKeselamatan();
+        renderTampilanSimulasi();
+    } catch (e) {
+        // Abaikan gangguan jaringan sesaat
+    } finally {
+        sedangFetchLive = false;
+    }
+}
+
+function ubahModeSimulasi(nilaiSelect) {
+    waktuOverrideManualLokal = Date.now();
+    if (nilaiSelect === 'AUTO') {
+        stateSimulasi.modeSistem = 'AUTO';
+        stateSimulasi.jalurPrioritas = 0;
+        catatLogSimulasi('Mode kerja diubah ke OTOMATIS (Adaptif Sensor 4 Jalur).');
+        if (stateSimulasi.modeLiveSensor && typeof fetch !== 'undefined') {
+            const body = new URLSearchParams({ id: '0', mode: 'auto' });
+            fetch('update_manual.php', { method: 'POST', body }).then(() => {
+                setTimeout(sinkronkanDataLiveEsp32, 300);
+            });
+        }
+    } else if (nilaiSelect.startsWith('MANUAL_')) {
+        const idPrio = parseInt(nilaiSelect.replace('MANUAL_', ''), 10);
+        if (idPrio >= 1 && idPrio <= KONFIG_SIMULASI.jumlahJalur) {
+            stateSimulasi.modeSistem = 'MANUAL';
+            stateSimulasi.jalurPrioritas = idPrio;
+            catatLogSimulasi(`Mode MANUAL aktif: Prioritas Jalur ${idPrio} menjadi Hijau (melewati transisi aman Kuning -> Semua Merah).`);
+            if (stateSimulasi.modeLiveSensor && typeof fetch !== 'undefined') {
+                const body = new URLSearchParams({ id: String(idPrio), mode: 'manual' });
+                fetch('update_manual.php', { method: 'POST', body }).then(() => {
+                    setTimeout(sinkronkanDataLiveEsp32, 300);
+                });
+            }
+        }
+    }
+    if (typeof document !== 'undefined') {
+        const selectMode = document.getElementById('selectModeSim');
+        if (selectMode) {
+            selectMode.value = (stateSimulasi.modeSistem === 'MANUAL' && stateSimulasi.jalurPrioritas >= 1)
+                ? `MANUAL_${stateSimulasi.jalurPrioritas}`
+                : 'AUTO';
+        }
+    }
+    renderTampilanSimulasi();
+}
+
+/**
+ * Mengatur lampu jalur tertentu menjadi Hijau secara Manual (idJalur = 1..4),
+ * atau mengembalikan ke mode Otomatis jika idJalur = 0.
+ */
+function setManualHijauJalur(idJalur) {
+    if (idJalur >= 1 && idJalur <= KONFIG_SIMULASI.jumlahJalur) {
+        ubahModeSimulasi(`MANUAL_${idJalur}`);
+    } else {
+        ubahModeSimulasi('AUTO');
+    }
+}
+
+/**
+ * Toggle tombol manual pada kartu jalur:
+ * - Jika jalur tersebut belum menjadi prioritas manual -> jadikan Hijau (Manual).
+ * - Jika jalur tersebut sudah menjadi prioritas manual -> kembalikan ke Otomatis (AUTO).
+ */
+function toggleManualJalur(idJalur) {
+    if (stateSimulasi.modeSistem === 'MANUAL' && stateSimulasi.jalurPrioritas === idJalur) {
+        setManualHijauJalur(0);
+    } else {
+        setManualHijauJalur(idJalur);
+    }
+}
+
 function ubahSliderJarak(idJalur, nilaiCm) {
     const j = stateSimulasi.jalur[idJalur];
     if (!j) return;
+
+    if (stateSimulasi.modeLiveSensor) {
+        setModeLiveSensor(false);
+    }
 
     j.modeSensorManual = true;
     j.jarakCm = Math.max(0.0, Math.min(50.0, parseFloat(nilaiCm) || 0.0));
@@ -732,6 +990,39 @@ function ubahSliderJarak(idJalur, nilaiCm) {
 function ubahAntreanMobil(idJalur, delta) {
     const j = stateSimulasi.jalur[idJalur];
     if (!j) return;
+
+    // Jika sedang Mode LIVE Sensor ESP32, kirim perubahan jumlah mobil secara real-time ke Database & Worker MQTT!
+    if (stateSimulasi.modeLiveSensor && typeof fetch !== 'undefined') {
+        j.jumlahMobilLive = Math.max(0, (j.jumlahMobilLive || 0) + delta);
+        if (j.jumlahMobilLive >= 4) {
+            j.kepadatan = 'Padat';
+            j.durasiRekomendasi = KONFIG_SIMULASI.hijauPadat;
+        } else if (j.jumlahMobilLive >= 2) {
+            j.kepadatan = 'Sedang';
+            j.durasiRekomendasi = KONFIG_SIMULASI.hijauSedang;
+        } else {
+            j.kepadatan = 'Sepi';
+            j.durasiRekomendasi = KONFIG_SIMULASI.hijauSepi;
+        }
+
+        if (delta > 0) {
+            tambahSatuMobilVisual(idJalur);
+        } else if (delta < 0) {
+            const idxTerakhir = j.antreanMobil.findLastIndex(m => !m.lewatGaris);
+            if (idxTerakhir >= 0) {
+                j.antreanMobil.splice(idxTerakhir, 1);
+            }
+        }
+
+        catatLogSimulasi(`[LIVE] Antrean Jalur ${idJalur} disesuaikan (${delta > 0 ? '+1' : '-1'} mobil) -> Total: ${j.jumlahMobilLive} Mobil (${j.kepadatan}).`);
+        renderTampilanSimulasi();
+
+        const body = new URLSearchParams({ id: String(idJalur), delta: String(delta) });
+        fetch('api_live_state.php', { method: 'POST', body }).then(() => {
+            setTimeout(sinkronkanDataLiveEsp32, 250);
+        });
+        return;
+    }
 
     j.modeSensorManual = false;
     if (delta > 0) {
@@ -773,7 +1064,12 @@ function resetSimulasi() {
         stateSimulasi.jalur[id] = buatStateJalurAwal(id, stateSimulasi.jalur[id].nama);
     }
 
-    catatLogSimulasi('Simulasi di-reset. Keadaan awal: SEMUA MERAH (1.0 dtk).');
+    if (stateSimulasi.modeLiveSensor) {
+        catatLogSimulasi('Mode LIVE Sensor ESP32 aktif. Menyinkronkan data sensor & lampu real-time...');
+        sinkronkanDataLiveEsp32();
+    } else {
+        catatLogSimulasi('Simulasi di-reset. Keadaan awal: SEMUA MERAH (1.0 dtk).');
+    }
     renderTampilanSimulasi();
 }
 
@@ -784,6 +1080,9 @@ function resetSimulasi() {
  * - 'C': Semua jalur sepi (Jalur 1..4 = 30.0 cm)
  */
 function terapkanPresetSkenario(kode) {
+    if (stateSimulasi.modeLiveSensor) {
+        setModeLiveSensor(false);
+    }
     resetSimulasi();
     if (kode === 'A') {
         ubahSliderJarak(1, 4.0);
@@ -826,6 +1125,12 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
     window.addEventListener('DOMContentLoaded', () => {
         resetSimulasi();
         mulaiLoopInterval();
+        if (timerPollingLive) clearInterval(timerPollingLive);
+        timerPollingLive = setInterval(() => {
+            if (stateSimulasi.berjalan && stateSimulasi.modeLiveSensor) {
+                sinkronkanDataLiveEsp32();
+            }
+        }, 250);
     });
 }
 

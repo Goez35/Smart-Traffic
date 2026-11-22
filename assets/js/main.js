@@ -25,6 +25,10 @@ const timerInterval = setInterval(updateTimer, 1000);
 
 function toggleAutoRefresh() {
     isAutoRefreshActive = !isAutoRefreshActive;
+    const refreshBtn = document.getElementById('refreshToggle');
+    if (refreshBtn) {
+        refreshBtn.setAttribute('aria-pressed', isAutoRefreshActive ? 'true' : 'false');
+    }
     if (isAutoRefreshActive) {
         countdown = refreshSeconds;
         if (refreshText) refreshText.innerText = 'Live: ' + countdown + 's';
@@ -35,11 +39,32 @@ function toggleAutoRefresh() {
     }
 }
 
-// Jeda auto-refresh ketika pengguna sedang fokus memilih dropdown/input
+// Pasang event listener tanpa inline JS (sesuai panduan modern-web-guidance)
 document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('form, select, input').forEach(el => {
         el.addEventListener('focus', () => { isUserInteracting = true; });
         el.addEventListener('blur', () => { isUserInteracting = false; });
+    });
+
+    const refreshBtn = document.getElementById('refreshToggle');
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', toggleAutoRefresh);
+    }
+
+    const globalSearch = document.getElementById('globalSearch');
+    if (globalSearch) {
+        globalSearch.addEventListener('input', (e) => filterIntersections(e.target.value));
+    }
+
+    const cardFilterSearch = document.getElementById('cardFilterSearch');
+    if (cardFilterSearch) {
+        cardFilterSearch.addEventListener('input', (e) => filterIntersections(e.target.value));
+    }
+
+    document.querySelectorAll('.control-form-wrapper form').forEach(form => {
+        form.addEventListener('submit', () => {
+            pauseRefreshDuringSubmit();
+        });
     });
 });
 
