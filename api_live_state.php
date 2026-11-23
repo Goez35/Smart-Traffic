@@ -7,67 +7,9 @@
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 
+// Lewati pengecekan migrasi DDL (ALTER/CREATE TABLE) pada endpoint polling 250ms agar sangat ringan
+define('SKIP_SCHEMA_MIGRATION', true);
 require_once __DIR__ . '/koneksi.php';
-
-// Jika request POST untuk menambah/mengurangi antrean mobil secara real-time dari halaman Simulasi 4 Jalur
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $idJalur = isset($_POST['id']) ? intval($_POST['id']) : 0;
-    $delta   = isset($_POST['delta']) ? intval($_POST['delta']) : 0;
-
-    if ($idJalur >= 1 && $idJalur <= 4 && $delta !== 0) {
-        $kunciAdjust = "adjust_mobil_{$idJalur}";
-
-        // 1. Tambahkan delta ke antrean perintah worker di tabel `config`
-        $stmtGet = $conn->prepare("SELECT `nilai` FROM `config` WHERE `kunci` = ?");
-        $nilaiSaatIni = 0;
-        if ($stmtGet) {
-            $stmtGet->bind_param("s", $kunciAdjust);
-            $stmtGet->execute();
-            $resGet = $stmtGet->get_result();
-            if ($rowGet = $resGet->fetch_assoc()) {
-                $nilaiSaatIni = intval($rowGet['nilai']);
-            }
-            $stmtGet->close();
-        }
-
-        $nilaiBaru = (string)($nilaiSaatIni + $delta);
-        $stmtUpdCfg = $conn->prepare("INSERT INTO `config` (`kunci`, `nilai`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `nilai` = VALUES(`nilai`)");
-        if ($stmtUpdCfg) {
-            $stmtUpdCfg->bind_param("ss", $kunciAdjust, $nilaiBaru);
-            $stmtUpdCfg->execute();
-            $stmtUpdCfg->close();
-        }
-
-        // 2. Perbarui langsung `status_persimpangan` agar respons visual di web terasa instan (< 50ms)
-        $stmtRow = $conn->prepare("SELECT `jumlah_kendaraan` FROM `status_persimpangan` WHERE `id` = ?");
-        if ($stmtRow) {
-            $stmtRow->bind_param("i", $idJalur);
-            $stmtRow->execute();
-            $resRow = $stmtRow->get_result();
-            if ($r = $resRow->fetch_assoc()) {
-                $jmlBaru = max(0, intval($r['jumlah_kendaraan']) + $delta);
-                if ($jmlBaru >= 4) {
-                    $kepBaru = 'Padat';
-                    $durBaru = 15;
-                } elseif ($jmlBaru >= 2) {
-                    $kepBaru = 'Sedang';
-                    $durBaru = 10;
-                } else {
-                    $kepBaru = 'Sepi';
-                    $durBaru = 5;
-                }
-                $rasioBaru = min(100.0, $jmlBaru * 25.0);
-                $stmtSave = $conn->prepare("UPDATE `status_persimpangan` SET `jumlah_kendaraan` = ?, `kepadatan` = ?, `rasio_terisi` = ?, `durasi_hijau` = ? WHERE `id` = ?");
-                if ($stmtSave) {
-                    $stmtSave->bind_param("isdii", $jmlBaru, $kepBaru, $rasioBaru, $durBaru, $idJalur);
-                    $stmtSave->execute();
-                    $stmtSave->close();
-                }
-            }
-            $stmtRow->close();
-        }
-    }
-}
 
 $config_map = [
     'mode'            => 'AUTO',
@@ -88,6 +30,55 @@ $cfg_res = $conn->query("SELECT `kunci`, `nilai` FROM `config`");
 if ($cfg_res) {
     while ($c = $cfg_res->fetch_assoc()) {
         $config_map[$c['kunci']] = $c['nilai'];
+    }
+}
+
+// Jika request POST untuk menambah/mengurangi antrean mobil secara real-time dari halaman Simulasi 4 Jalur
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $idJalur = isset($_POST['id']) ? intval($_POST['id']) : 0;
+    $delta   = isset($_POST['delta']) ? intval($_POST['delta']) : 0;
+
+    if ($idJalur >= 1 && $idJalur <= 4 && $delta !== 0) {
+        $kunciAdjust = "adjust_mobil_{$idJalur}";
+        $deltaStr    = (string)$delta;
+
+        // 1. Operasi atomik SQL agar klik cepat tidak pernah saling menimpa (lost update)
+        $stmtUpdCfg = $conn->prepare("INSERT INTO `config` (`kunci`, `nilai`) VALUES (?, ?)
+            ON DUPLICATE KEY UPDATE `nilai` = CAST(CAST(`nilai` AS SIGNED) + CAST(VALUES(`nilai`) AS SIGNED) AS CHAR)");
+        if ($stmtUpdCfg) {
+            $stmtUpdCfg->bind_param("ss", $kunciAdjust, $deltaStr);
+            $stmtUpdCfg->execute();
+            $stmtUpdCfg->close();
+        }
+
+        // 2. Perbarui langsung `status_persimpangan` memakai durasi dari `config`
+        $stmtRow = $conn->prepare("SELECT `jumlah_kendaraan` FROM `status_persimpangan` WHERE `id` = ?");
+        if ($stmtRow) {
+            $stmtRow->bind_param("i", $idJalur);
+            $stmtRow->execute();
+            $resRow = $stmtRow->get_result();
+            if ($r = $resRow->fetch_assoc()) {
+                $jmlBaru = max(0, intval($r['jumlah_kendaraan']) + $delta);
+                if ($jmlBaru >= 4) {
+                    $kepBaru = 'Padat';
+                    $durBaru = max(1, intval($config_map['hijau_padat'] ?? 15));
+                } elseif ($jmlBaru >= 2) {
+                    $kepBaru = 'Sedang';
+                    $durBaru = max(1, intval($config_map['hijau_sedang'] ?? 10));
+                } else {
+                    $kepBaru = 'Sepi';
+                    $durBaru = max(1, intval($config_map['hijau_sepi'] ?? 5));
+                }
+                $rasioBaru = min(100.0, $jmlBaru * 25.0);
+                $stmtSave = $conn->prepare("UPDATE `status_persimpangan` SET `jumlah_kendaraan` = ?, `kepadatan` = ?, `rasio_terisi` = ?, `durasi_hijau` = ? WHERE `id` = ?");
+                if ($stmtSave) {
+                    $stmtSave->bind_param("isdii", $jmlBaru, $kepBaru, $rasioBaru, $durBaru, $idJalur);
+                    $stmtSave->execute();
+                    $stmtSave->close();
+                }
+            }
+            $stmtRow->close();
+        }
     }
 }
 

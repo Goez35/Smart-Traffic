@@ -25,6 +25,8 @@ if ($conn->connect_error) {
 
 $conn->set_charset("utf8mb4");
 
-require_once __DIR__ . '/includes/db_init.php';
-pastikanSkemaDatabase($conn);
+if (!defined('SKIP_SCHEMA_MIGRATION')) {
+    require_once __DIR__ . '/includes/db_init.php';
+    pastikanSkemaDatabase($conn);
+}
 ?>

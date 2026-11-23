@@ -96,12 +96,13 @@ $durasiHijauTarget   = 5;       // Durasi hijau terpilih untuk siklus saat ini (
 $waktuMulaiFase      = microtime(true);
 $seqCmd              = 1;
 
-// Pelacak waktu tunggu per jalur agar tidak ada jalur yang menunggu terus (anti-starvation)
+// Pelacak waktu giliran terakhir per jalur
+$sekarangAwal = microtime(true);
 $giliranTerakhir = [
-    1 => microtime(true),
-    2 => 0.0,
-    3 => 0.0,
-    4 => 0.0,
+    1 => $sekarangAwal,
+    2 => $sekarangAwal,
+    3 => $sekarangAwal,
+    4 => $sekarangAwal,
 ];
 
 $waktuMuatConfigTerakhir = 0.0;
@@ -165,7 +166,7 @@ function muatConfigDariDb(mysqli $conn, array &$cfg, array &$dataJalur, array &$
                 $cfg['hijau_min'] = max(1, intval($v));
                 break;
             case 'hijau_maks':
-                $cfg['hijau_maks'] = max($cfg['hijau_min'], intval($v));
+                $cfg['hijau_maks'] = max(1, intval($v));
                 break;
             case 'kuning':
                 $cfg['kuning'] = max(1, intval($v));
@@ -197,6 +198,8 @@ function muatConfigDariDb(mysqli $conn, array &$cfg, array &$dataJalur, array &$
                 break;
         }
     }
+    // Pastikan hijau_maks selalu >= hijau_min setelah seluruh baris config selesai dibaca
+    $cfg['hijau_maks'] = max($cfg['hijau_min'], $cfg['hijau_maks']);
 }
 
 function sinkronkanStatusPersimpanganKeDb(
@@ -434,58 +437,16 @@ function hitungDurasiHijauAdaptif(string $kepadatan, array $cfg): int {
  * Memilih jalur berikutnya yang akan diberi lampu hijau:
  * - Bila mode MANUAL dan prioritas (1..4) disetel: pilih jalur prioritas.
  * - Bila mode AUTO:
- *   - Prioritaskan jalur dengan kepadatan & tabungan `jumlah_mobil` tertinggi,
- *     dikombinasikan dengan waktu tunggu (anti-starvation).
+ *   - Berputar berurutan (Round-Robin: Jalur 1 -> 2 -> 3 -> 4 -> 1).
+ *   - Yang diadaptasikan berdasarkan jumlah kendaraan/kepadatan adalah DURASI lampu hijaunya
+ *     ketika giliran jalur tersebut tiba (Sepi = 5s, Sedang = 10s, Padat = 15s).
  */
 function pilihJalurBerikutnya(int $jalurSaatIni, array $dataJalur, array $cfg, array $giliranTerakhir): int {
     if ($cfg['mode'] === 'MANUAL' && $cfg['prioritas'] >= 1 && $cfg['prioritas'] <= JUMLAH_JALUR) {
         return $cfg['prioritas'];
     }
 
-    // Kandidat urutan Round-Robin mulai dari jalur setelah jalurSaatIni
-    $kandidatUrut = [];
-    for ($step = 1; $step <= JUMLAH_JALUR; $step++) {
-        $id = (($jalurSaatIni - 1 + $step) % JUMLAH_JALUR) + 1;
-        if ($id !== $jalurSaatIni) {
-            $kandidatUrut[] = $id;
-        }
-    }
-
-    // Cek apakah semua jalur memiliki jumlah mobil & kepadatan yang identik (mis. semua 0 mobil Sepi)
-    $semuaSamaKosong = true;
-    for ($id = 1; $id <= JUMLAH_JALUR; $id++) {
-        if ($dataJalur[$id]['jumlah_mobil'] > 0 || $dataJalur[$id]['kepadatan'] !== 'Sepi') {
-            $semuaSamaKosong = false;
-            break;
-        }
-    }
-    if ($semuaSamaKosong) {
-        return $kandidatUrut[0];
-    }
-
-    $sekarang    = microtime(true);
-    $idTerbaik   = $kandidatUrut[0];
-    $skorTerbaik = -1.0;
-
-    foreach ($kandidatUrut as $id) {
-        $bobotKepadatan = 0.0;
-        if ($dataJalur[$id]['kepadatan'] === 'Padat') {
-            $bobotKepadatan = 200.0;
-        } elseif ($dataJalur[$id]['kepadatan'] === 'Sedang') {
-            $bobotKepadatan = 100.0;
-        }
-
-        $bobotMobil  = intval($dataJalur[$id]['jumlah_mobil']) * 35.0;
-        $waktuTunggu = max(0.0, $sekarang - ($giliranTerakhir[$id] ?? 0.0));
-        $skor        = $bobotKepadatan + $bobotMobil + $dataJalur[$id]['rasio'] + ($waktuTunggu * 3.5);
-
-        if ($skor > $skorTerbaik) {
-            $skorTerbaik = $skor;
-            $idTerbaik   = $id;
-        }
-    }
-
-    return $idTerbaik;
+    return ($jalurSaatIni % JUMLAH_JALUR) + 1;
 }
 
 /**
@@ -596,9 +557,14 @@ $mqtt->onMessage(function (string $topic, string $payload) use (
             $waktuStateEsp32Terakhir = $sekarang;
             $esp32Status             = 'online';
 
-            // Jika kita baru meminta jalurAktif menjadi HIJAU dan maket ESP32 baru saja benar-benar menyalakan LED Hijau tersebut,
-            // mulai hitung mundur durasi hijau dari detik ini agar maket tidak terpotong waktu transisi!
-            if ($menungguAckHijauEsp32 && $faseSekarang === 'HIJAU' && ($dataJalur[$jalurAktif]['lampu_aktual'] ?? '') === 'hijau') {
+            // Jika kita baru meminta jalurAktif menjadi HIJAU dan maket ESP32 baru saja benar-benar menyalakan LED Hijau tersebut
+            // (dalam batas toleransi <= 3.5 detik sejak fase dimulai), mulai hitung mundur durasi hijau dari detik ini
+            if (
+                $menungguAckHijauEsp32
+                && $faseSekarang === 'HIJAU'
+                && ($dataJalur[$jalurAktif]['lampu_aktual'] ?? '') === 'hijau'
+                && ($sekarang - $waktuMulaiFase) <= 3.5
+            ) {
                 $menungguAckHijauEsp32 = false;
                 $waktuMulaiFase        = $sekarang;
             }
@@ -775,8 +741,9 @@ while (true) {
             }
             hitungKepadatanJalur($jalurAktif, $sampelJendela, $dataJalur, $cfg);
 
-            $faseSekarang   = 'KUNING';
-            $waktuMulaiFase = $sekarang;
+            $menungguAckHijauEsp32 = false;
+            $faseSekarang          = 'KUNING';
+            $waktuMulaiFase        = $sekarang;
             publishPerintahLampu($mqtt, $topicCmd, $seqCmd, $jalurAktif, $faseSekarang, $durasiHijauTarget);
             sinkronkanStatusPersimpanganKeDb($conn, $dataJalur, $cfg, $jalurAktif, $faseSekarang, $durasiHijauTarget, $waktuMulaiFase, $waktuStateEsp32Terakhir);
             echo sprintf(

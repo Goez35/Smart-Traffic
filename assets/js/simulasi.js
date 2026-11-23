@@ -56,41 +56,10 @@ function pilihJalurBerikutnya(jalurSaatIni, daftarJalur, modeSistem, jalurPriori
         return jalurPrioritas;
     }
 
-    // Susun kandidat jalur selain jalur yang baru saja aktif, berurutan searah jarum jam
-    const kandidat = [];
-    const titikAwal = (jalurSaatIni >= 1 && jalurSaatIni <= KONFIG_SIMULASI.jumlahJalur) ? jalurSaatIni : 4;
-    for (let step = 1; step <= KONFIG_SIMULASI.jumlahJalur; step++) {
-        const id = ((titikAwal - 1 + step) % KONFIG_SIMULASI.jumlahJalur) + 1;
-        if (id !== jalurSaatIni) {
-            kandidat.push(daftarJalur[id]);
-        }
-    }
-
-    // 2. Pengaman Anti-Kelaparan (Anti-Starvation):
-    // Cari jalur yang waktu tunggunya sudah mencapai/melebihi batasKelaparanDetik
-    const kandidatKelaparan = kandidat.filter(j => j.waktuTungguDetik >= KONFIG_SIMULASI.batasKelaparanDetik);
-    if (kandidatKelaparan.length > 0) {
-        kandidatKelaparan.sort((a, b) => b.waktuTungguDetik - a.waktuTungguDetik);
-        return kandidatKelaparan[0].id;
-    }
-
-    // 3. Pilih rasio terisi tertinggi; jika seri (selisih < 0.01%), pilih yang paling lama menunggu
-    let terbaik = kandidat[0];
-    for (let i = 1; i < kandidat.length; i++) {
-        const uji = kandidat[i];
-        const selisihRasio = uji.rasioTerisi - terbaik.rasioTerisi;
-
-        if (selisihRasio > 0.01) {
-            terbaik = uji;
-        } else if (Math.abs(selisihRasio) <= 0.01) {
-            // Seri pada rasio terisi -> pilih yang paling lama menunggu
-            if (uji.waktuTungguDetik - terbaik.waktuTungguDetik > 0.01) {
-                terbaik = uji;
-            }
-        }
-    }
-
-    return terbaik.id;
+    // 2. Mode Otomatis: putar giliran secara berurutan (Jalur 1 -> 2 -> 3 -> 4 -> 1)
+    //    sementara durasi lampu hijaunya yang beradaptasi mengikuti kepadatan/jumlah kendaraan.
+    const titikAwal = (jalurSaatIni >= 1 && jalurSaatIni <= KONFIG_SIMULASI.jumlahJalur) ? jalurSaatIni : 0;
+    return (titikAwal % KONFIG_SIMULASI.jumlahJalur) + 1;
 }
 
 // ============================================================================
@@ -701,7 +670,9 @@ function mulaiLoopInterval() {
     timerLoopSimulasi = setInterval(() => {
         if (!stateSimulasi.berjalan) return;
         const dtDasar = KONFIG_SIMULASI.intervalTickDasarMs / 1000.0;
-        for (let step = 0; step < stateSimulasi.kecepatan; step++) {
+        // Pada Mode LIVE Sensor ESP32, waktu selalu berjalan 1x mengikuti waktu nyata (tidak dipercepat 2x/5x)
+        const langkah = stateSimulasi.modeLiveSensor ? 1 : stateSimulasi.kecepatan;
+        for (let step = 0; step < langkah; step++) {
             satuLangkahSimulasi(dtDasar);
         }
         renderTampilanSimulasi();
@@ -912,7 +883,7 @@ function ubahModeSimulasi(nilaiSelect) {
         stateSimulasi.jalurPrioritas = 0;
         catatLogSimulasi('Mode kerja diubah ke OTOMATIS (Adaptif Sensor 4 Jalur).');
         if (stateSimulasi.modeLiveSensor && typeof fetch !== 'undefined') {
-            const body = new URLSearchParams({ id: '0', mode: 'auto' });
+            const body = new URLSearchParams({ id: '0', mode: 'auto', ajax: '1' });
             fetch('update_manual.php', { method: 'POST', body }).then(() => {
                 setTimeout(sinkronkanDataLiveEsp32, 300);
             });
@@ -924,7 +895,7 @@ function ubahModeSimulasi(nilaiSelect) {
             stateSimulasi.jalurPrioritas = idPrio;
             catatLogSimulasi(`Mode MANUAL aktif: Prioritas Jalur ${idPrio} menjadi Hijau (melewati transisi aman Kuning -> Semua Merah).`);
             if (stateSimulasi.modeLiveSensor && typeof fetch !== 'undefined') {
-                const body = new URLSearchParams({ id: String(idPrio), mode: 'manual' });
+                const body = new URLSearchParams({ id: String(idPrio), mode: 'manual', ajax: '1' });
                 fetch('update_manual.php', { method: 'POST', body }).then(() => {
                     setTimeout(sinkronkanDataLiveEsp32, 300);
                 });
