@@ -76,6 +76,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
+    // Jika dipanggil secara asynchronous (fetch/AJAX dari simulasi.php), balas dengan JSON ringan tanpa redirect HTML penuh
+    if (!empty($_POST['ajax'])) {
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode([
+            'ok'        => true,
+            'mode'      => $modeCfg,
+            'prioritas' => intval($prioritasCfg),
+        ]);
+        exit;
+    }
+
     header("Location: index.php#control-section");
     exit;
 }
