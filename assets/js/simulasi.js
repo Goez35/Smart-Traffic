@@ -79,6 +79,7 @@ function buatStateJalurAwal(id, nama) {
         rasioTerisi: 0.0,        // 0 - 100 (%)
         kepadatan: 'Sepi',       // 'Sepi' | 'Sedang' | 'Padat'
         jumlahMobilLive: 0,      // Jumlah kendaraan nyata yang dihitung oleh worker_mqtt.php
+        sensorHijauTerkunci: false, // Kunci hysteresis visual untuk mendeteksi mobil melintas saat lampu hijau
         durasiRekomendasi: KONFIG_SIMULASI.hijauSepi,
         waktuTungguDetik: (4 - id) * 0.1, // Pembeda awal kecil agar urutan awal mulai dari Jalur 1
     };
@@ -807,6 +808,7 @@ async function sinkronkanDataLiveEsp32() {
             if (!stateSimulasi.jalur[id]) continue;
             const j = stateSimulasi.jalur[id];
 
+            const lampuSebelumnya = j.lampu;
             j.jarakCm = parseFloat(l.jarak_cm ?? 30.0);
             j.lampu = (['merah', 'kuning', 'hijau'].includes(l.lampu_aktif)) ? l.lampu_aktif : 'merah';
             j.rasioTerisi = parseFloat(l.rasio_terisi ?? 0.0);
@@ -819,21 +821,41 @@ async function sinkronkanDataLiveEsp32() {
             }
 
             // Sinkronkan jumlah mobil animasi visual di jalan dengan jumlah kendaraan nyata dari sensor
-            const terisiSekarang = j.jarakCm < KONFIG_SIMULASI.ambangCm;
-            const targetMobilVisual = Math.min(6, Math.max(j.jumlahMobilLive, terisiSekarang ? 1 : 0));
-            const mobilMengantre = j.antreanMobil.filter(m => !m.lewatGaris).length;
+            const ambangDeteksi = KONFIG_SIMULASI.ambangCm;
+            const batasLepasHysteresis = ambangDeteksi + 2.0;
 
-            if (mobilMengantre < targetMobilVisual) {
-                for (let k = mobilMengantre; k < targetMobilVisual; k++) {
-                    tambahSatuMobilVisual(id);
+            if (j.lampu !== 'hijau') {
+                const terisiSekarang = j.jarakCm < ambangDeteksi;
+                const targetMobilVisual = Math.min(6, Math.max(j.jumlahMobilLive, terisiSekarang ? 1 : 0));
+                const mobilMengantre = j.antreanMobil.filter(m => !m.lewatGaris).length;
+
+                if (mobilMengantre < targetMobilVisual) {
+                    for (let k = mobilMengantre; k < targetMobilVisual; k++) {
+                        tambahSatuMobilVisual(id);
+                    }
+                } else if (mobilMengantre > targetMobilVisual) {
+                    // Kurangi kelebihan mobil visual saat counter di-reset
+                    let selisih = mobilMengantre - targetMobilVisual;
+                    while (selisih > 0) {
+                        const idx = j.antreanMobil.findLastIndex(m => !m.lewatGaris);
+                        if (idx >= 0) j.antreanMobil.splice(idx, 1);
+                        selisih--;
+                    }
                 }
-            } else if (mobilMengantre > targetMobilVisual && j.lampu !== 'hijau') {
-                // Kurangi kelebihan mobil visual saat counter di-reset
-                let selisih = mobilMengantre - targetMobilVisual;
-                while (selisih > 0) {
-                    const idx = j.antreanMobil.findLastIndex(m => !m.lewatGaris);
-                    if (idx >= 0) j.antreanMobil.splice(idx, 1);
-                    selisih--;
+
+                // Catat kondisi sensor sebelum hijau agar objek yang sudah berhenti saat merah tidak terhitung dobel
+                j.sensorHijauTerkunci = terisiSekarang;
+            } else {
+                // Saat lampu HIJAU: biarkan mobil antrean melaju habis.
+                // Hanya munculkan 1 mobil visual baru jika sensor mendeteksi transisi baru (kosong -> terisi) dengan hysteresis.
+                if (lampuSebelumnya !== 'hijau' && j.jarakCm < ambangDeteksi) {
+                    j.sensorHijauTerkunci = true;
+                }
+                if (!j.sensorHijauTerkunci && j.jarakCm < ambangDeteksi) {
+                    j.sensorHijauTerkunci = true;
+                    tambahSatuMobilVisual(id);
+                } else if (j.sensorHijauTerkunci && j.jarakCm >= batasLepasHysteresis) {
+                    j.sensorHijauTerkunci = false;
                 }
             }
         }
